@@ -994,6 +994,8 @@ def main():
                 is_test_user = str(st.session_state.current_user_id).startswith("test_")
                 recommendations = []  # Initialize
                 
+                # Initialize actual_user_id for test users
+                actual_user_id = None
                 if is_test_user:
                     # Test user - use model's user_id directly
                     actual_user_id = int(st.session_state.current_user_id.replace("test_", ""))
@@ -1045,10 +1047,12 @@ def main():
                             )
                         
                         st.rerun()
-                
-                # Display saved recommendations for test user
-                if f'test_user_recs_{actual_user_id}' in st.session_state:
-                    recommendations = st.session_state[f'test_user_recs_{actual_user_id}']
+                    
+                    # Display saved recommendations for test user
+                    if f'test_user_recs_{actual_user_id}' in st.session_state:
+                        recommendations = st.session_state[f'test_user_recs_{actual_user_id}']
+                    else:
+                        recommendations = []
                 else:
                     # Regular user - rate games first
                     st.subheader("💡 Rate some games to get personalized recommendations")
@@ -1207,7 +1211,7 @@ def main():
                                 st.rerun()
                 
                 # Get recommendations from session state if available
-                if is_test_user:
+                if is_test_user and actual_user_id is not None:
                     if f'test_user_recs_{actual_user_id}' in st.session_state:
                         recommendations = st.session_state[f'test_user_recs_{actual_user_id}']
                     else:
