@@ -337,8 +337,11 @@ def load_model():
     """Load pre-trained model from pickle file or URL"""
     model_path = Path('models/recommendation_model.pkl')
     
-    # Check if model URL is provided in secrets
-    model_url = None
+    # Default model URL (Google Drive)
+    DEFAULT_MODEL_URL = "https://drive.google.com/uc?export=download&id=180S_9i5886cn9l9qKCeAmft0otJpEN64"
+    
+    # Check if model URL is provided in secrets, otherwise use default
+    model_url = DEFAULT_MODEL_URL
     try:
         if hasattr(st, 'secrets') and 'model' in st.secrets and 'url' in st.secrets.model:
             model_url = st.secrets.model.url
