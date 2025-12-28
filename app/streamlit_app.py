@@ -33,10 +33,19 @@ st.markdown("""
         font-size: 3rem;
         font-weight: bold;
         text-align: center;
+        color: #667eea !important;
         background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
+        background-clip: text;
         margin-bottom: 1rem;
+    }
+    /* Fallback: if gradient doesn't work, use solid color */
+    @supports not (-webkit-background-clip: text) {
+        .main-header {
+            color: #667eea !important;
+            -webkit-text-fill-color: #667eea !important;
+        }
     }
     .game-card {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -44,22 +53,27 @@ st.markdown("""
         border-radius: 15px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         margin-bottom: 1rem;
-        color: white;
+        color: white !important;
+    }
+    .game-card * {
+        color: white !important;
     }
     .game-title {
         font-size: 1.5rem;
         font-weight: bold;
         margin-bottom: 0.5rem;
+        color: white !important;
     }
     .metric-card {
         background: #f0f2f6;
         padding: 1rem;
         border-radius: 10px;
         text-align: center;
+        color: #1f2937;
     }
     .stButton>button {
         background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        color: white;
+        color: white !important;
         border: none;
         border-radius: 10px;
         padding: 0.5rem 1rem;
@@ -68,6 +82,11 @@ st.markdown("""
     .stButton>button:hover {
         background: linear-gradient(90deg, #764ba2 0%, #667eea 100%);
         transform: scale(1.05);
+        color: white !important;
+    }
+    /* Ensure all text in game cards is white */
+    .game-card p, .game-card strong {
+        color: white !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -337,7 +356,7 @@ def load_model():
     """Load pre-trained model from pickle file or URL"""
     model_path = Path('models/recommendation_model.pkl')
     
-    # Model URL (Google Drive) - hardcoded
+    # Model URL (Google Drive)
     MODEL_URL = "https://drive.google.com/uc?export=download&id=180S_9i5886cn9l9qKCeAmft0otJpEN64&confirm=t"
     
     # If model doesn't exist locally, download from URL
