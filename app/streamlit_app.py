@@ -26,6 +26,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Suppress warnings for cleaner output
+import warnings
+warnings.filterwarnings('ignore')
+
 # Custom CSS for beautiful design
 st.markdown("""
 <style>
@@ -341,9 +345,12 @@ class HybridRecommendationSystem:
         
         return filtered_recs
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=False, max_entries=1)
 def load_model():
     """Load pre-trained model from pickle file or URL"""
+    import sys
+    import traceback
+    
     model_path = Path('models/recommendation_model.pkl')
     
     # Model URL (Google Drive)
@@ -590,26 +597,27 @@ def load_model():
                 return None, None
         
         # Create system and load data
-        system = HybridRecommendationSystem()
-        system.load_from_pickle(model_data)
-        
-        # Get games dataframe
-        games_df = model_data['games_df']
-        
-        return system, games_df
+        try:
+            system = HybridRecommendationSystem()
+            system.load_from_pickle(model_data)
+            
+            # Get games dataframe
+            games_df = model_data['games_df']
+            
+            return system, games_df
+        except Exception as load_error:
+            # Log error but don't show in UI (will be handled in main)
+            import sys
+            print(f"Error in load_from_pickle: {load_error}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+            raise load_error
     except Exception as e:
-        st.error(f"Error loading model: {e}")
-        st.warning("💡 **Possible solutions:**")
-        st.info("""
-        1. **Update dependencies:** `pip install -r requirements.txt --upgrade`
-        2. **Reinstall numpy:** `pip install "numpy>=1.24.3,<2.0.0" --force-reinstall`
-        3. **Check model file:** Ensure `models/recommendation_model.pkl` exists
-        4. **Version mismatch:** Model may have been trained with different package versions
-        """)
-        import traceback
-        with st.expander("🔍 Full Error Details"):
-            st.code(traceback.format_exc())
-        return None, None
+        # Log error to stderr for debugging
+        import sys
+        print(f"Error loading model: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        # Don't show error here - let main() handle it
+        raise e
 
 @st.cache_data(ttl=300, show_spinner=False)  # Cache for 5 minutes
 def get_cached_recommendations(_model, user_ratings_dict, top_n):
@@ -688,20 +696,42 @@ def main():
     st.markdown('<h1 class="main-header">🎮 Steam Games Recommendation System</h1>', unsafe_allow_html=True)
     st.markdown("---")
     
-    # Auto load model (silent)
+    # Auto load model (with better error handling)
     if not st.session_state.model_loaded:
-        system, games_df = load_model()
-        if system is not None and games_df is not None:
-            st.session_state.model_data = system
-            st.session_state.games_df = games_df
-            st.session_state.model_loaded = True
-        else:
-            st.error("❌ Model not found! Please place `models/recommendation_model.pkl`")
+        try:
+            with st.spinner("🔄 Loading model... This may take a moment."):
+                system, games_df = load_model()
+                if system is not None and games_df is not None:
+                    st.session_state.model_data = system
+                    st.session_state.games_df = games_df
+                    st.session_state.model_loaded = True
+                else:
+                    st.error("❌ Model not found! Please place `models/recommendation_model.pkl`")
+                    st.info("""
+                    **Instructions:**
+                    1. Make sure `recommendation_model.pkl` is in the `models/` folder
+                    2. Refresh this page
+                    """)
+                    st.stop()
+        except Exception as e:
+            st.error(f"❌ Error loading model: {e}")
+            st.warning("💡 **Possible issues:**")
             st.info("""
-            **Instructions:**
-            1. Make sure `recommendation_model.pkl` is in the `models/` folder
-            2. Refresh this page
+            **Common causes:**
+            1. **Memory limit:** Model is too large for Streamlit Cloud (1GB limit)
+            2. **Timeout:** Loading model takes too long
+            3. **Corrupted file:** Model file may be corrupted
+            4. **Version mismatch:** Package versions don't match
+            
+            **Solutions:**
+            1. Check Streamlit Cloud logs for detailed error
+            2. Try reducing model size or using smaller model
+            3. Verify model file integrity
+            4. Check package versions in requirements.txt
             """)
+            import traceback
+            with st.expander("🔍 Full Error Details"):
+                st.code(traceback.format_exc())
             st.stop()
     
     # Sidebar - User Management

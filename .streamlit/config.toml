@@ -1,14 +1,13 @@
-[theme]
-primaryColor = "#667eea"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f0f2f6"
-textColor = "#262730"
-font = "sans serif"
-
 [server]
-headless = true
-enableCORS = false
-enableXsrfProtection = true
+# Increase timeout for large model loading
+maxUploadSize = 2000
+maxMessageSize = 2000
 
-[client]
-showErrorDetails = true
+[runner]
+# Increase memory limit
+fastReruns = true
+magicEnabled = true
+
+[browser]
+# Server settings
+gatherUsageStats = false
