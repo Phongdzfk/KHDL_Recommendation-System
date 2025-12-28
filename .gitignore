@@ -21,3 +21,7 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# Model files (too large for git)
+models/*.pkl
+!models/.gitkeep
