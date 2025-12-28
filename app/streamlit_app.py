@@ -337,33 +337,17 @@ def load_model():
     """Load pre-trained model from pickle file or URL"""
     model_path = Path('models/recommendation_model.pkl')
     
-    # Default model URL (Google Drive) - with confirm parameter to bypass virus scan
-    DEFAULT_MODEL_URL = "https://drive.google.com/uc?export=download&id=180S_9i5886cn9l9qKCeAmft0otJpEN64&confirm=t"
+    # Model URL (Google Drive) - hardcoded
+    MODEL_URL = "https://drive.google.com/uc?export=download&id=180S_9i5886cn9l9qKCeAmft0otJpEN64&confirm=t"
     
-    # Check if model URL is provided in secrets, otherwise use default
-    model_url = DEFAULT_MODEL_URL
-    try:
-        if hasattr(st, 'secrets') and 'model' in st.secrets and 'url' in st.secrets.model:
-            model_url = st.secrets.model.url
-    except:
-        pass
-    
-    # If model doesn't exist locally and URL is provided, download it
-    if not model_path.exists() and model_url:
+    # If model doesn't exist locally, download from URL
+    if not model_path.exists():
         st.info("📥 Downloading model from cloud storage... This may take a few minutes.")
         try:
             import requests
             
-            # For Google Drive, try with confirm parameter if needed
-            if 'drive.google.com' in model_url and 'confirm=' not in model_url:
-                # Add confirm=t to bypass virus scan warning
-                if '?' in model_url:
-                    model_url = model_url + '&confirm=t'
-                else:
-                    model_url = model_url + '?confirm=t'
-            
             # Download with progress
-            response = requests.get(model_url, stream=True, timeout=600)  # 10 min timeout for large file
+            response = requests.get(MODEL_URL, stream=True, timeout=600)  # 10 min timeout for large file
             response.raise_for_status()  # Raise error if bad status
             total_size = int(response.headers.get('content-length', 0))
             
