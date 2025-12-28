@@ -335,15 +335,34 @@ class HybridRecommendationSystem:
 @st.cache_resource(show_spinner=False)
 def load_model():
     """Load pre-trained model from pickle file"""
-    # Use absolute path from app directory
-    app_dir = Path(__file__).parent.parent
-    model_path = app_dir / 'models' / 'recommendation_model.pkl'
+    model_path = Path('models/recommendation_model.pkl')
     
     if not model_path.exists():
-        # Try relative path as fallback
-        model_path = Path('models/recommendation_model.pkl')
-        if not model_path.exists():
-            return None, None
+        return None, None
+    
+    # Check if file is actually a pickle file (not a Git LFS pointer)
+    try:
+        with open(model_path, 'rb') as f:
+            first_bytes = f.read(100)
+            # Check if it's a Git LFS pointer file
+            if b'version https://git-lfs.github.com' in first_bytes:
+                st.error("❌ Model file is a Git LFS pointer, not the actual file!")
+                st.warning("💡 **Git LFS file chưa được download đúng cách.**")
+                st.info("""
+                **Giải pháp:**
+                1. Đảm bảo Git LFS đã được cài đặt trên Streamlit Cloud
+                2. File cần được download từ Git LFS, không phải pointer
+                3. Kiểm tra xem file có kích thước đúng không (nên > 100MB)
+                """)
+                return None, None
+            # Check if it's a valid pickle file (starts with pickle protocol markers)
+            if not (first_bytes.startswith(b'\x80') or first_bytes.startswith(b'PK') or b'pickle' in first_bytes[:20].lower()):
+                st.error("❌ File không phải là pickle file hợp lệ!")
+                st.warning(f"💡 File có thể bị corrupt hoặc không đúng định dạng.")
+                return None, None
+    except Exception as e:
+        st.error(f"❌ Không thể đọc file: {e}")
+        return None, None
     
     try:
         # Try loading with error handling for version mismatches
@@ -369,6 +388,25 @@ def load_model():
                             model_data = p5.load(f)
                         except ImportError:
                             raise e  # Re-raise original error
+            except (pickle.UnpicklingError, ValueError, EOFError) as e:
+                # Handle corrupt file or invalid pickle
+                st.error(f"❌ Lỗi khi load pickle file: {e}")
+                st.warning("💡 **File có thể bị corrupt hoặc không đúng định dạng.**")
+                st.info("""
+                **Nguyên nhân có thể:**
+                1. File bị corrupt khi upload/download
+                2. Git LFS chưa download file đúng cách
+                3. File không phải là pickle file hợp lệ
+                
+                **Giải pháp:**
+                1. Kiểm tra file trên GitHub có kích thước đúng không
+                2. Đảm bảo Git LFS đã download file đúng cách
+                3. Thử push lại model file lên Git LFS
+                """)
+                import traceback
+                with st.expander("🔍 Full Error Details"):
+                    st.code(traceback.format_exc())
+                return None, None
         
         # Create system and load data
         system = HybridRecommendationSystem()
@@ -471,31 +509,18 @@ def main():
     
     # Auto load model (silent)
     if not st.session_state.model_loaded:
-        try:
-            system, games_df = load_model()
-            if system is not None and games_df is not None:
-                st.session_state.model_data = system
-                st.session_state.games_df = games_df
-                st.session_state.model_loaded = True
-            else:
-                st.error("❌ Model not found!")
-                st.warning("""
-                **Possible issues:**
-                1. Model file not uploaded to Git LFS correctly
-                2. Git LFS not pulling model file on Streamlit Cloud
-                3. Model file path incorrect
-                
-                **Check:**
-                - Go to GitHub repository
-                - Verify `models/recommendation_model.pkl` shows "Stored with Git LFS"
-                - Check Streamlit Cloud logs for Git LFS errors
-                """)
-                st.stop()
-        except Exception as e:
-            st.error(f"❌ Error loading app: {e}")
-            import traceback
-            with st.expander("🔍 Full Error Details"):
-                st.code(traceback.format_exc())
+        system, games_df = load_model()
+        if system is not None and games_df is not None:
+            st.session_state.model_data = system
+            st.session_state.games_df = games_df
+            st.session_state.model_loaded = True
+        else:
+            st.error("❌ Model not found! Please place `models/recommendation_model.pkl`")
+            st.info("""
+            **Instructions:**
+            1. Make sure `recommendation_model.pkl` is in the `models/` folder
+            2. Refresh this page
+            """)
             st.stop()
     
     # Sidebar - User Management
