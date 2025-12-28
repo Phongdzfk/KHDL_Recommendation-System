@@ -11,8 +11,15 @@ import os
 class UserHistoryDB:
     def __init__(self, db_path='data/user_history.db'):
         """Initialize database connection"""
-        self.db_path = db_path
-        self.db_dir = Path(db_path).parent
+        # Use absolute path to avoid issues on Streamlit Cloud
+        if not Path(db_path).is_absolute():
+            # Get project root (assuming database.py is in src/)
+            project_root = Path(__file__).parent.parent
+            self.db_path = str(project_root / db_path)
+        else:
+            self.db_path = db_path
+        
+        self.db_dir = Path(self.db_path).parent
         
         # Create directory if not exists
         self.db_dir.mkdir(parents=True, exist_ok=True)

@@ -335,10 +335,15 @@ class HybridRecommendationSystem:
 @st.cache_resource(show_spinner=False)
 def load_model():
     """Load pre-trained model from pickle file"""
-    model_path = Path('models/recommendation_model.pkl')
+    # Use absolute path from app directory
+    app_dir = Path(__file__).parent.parent
+    model_path = app_dir / 'models' / 'recommendation_model.pkl'
     
     if not model_path.exists():
-        return None, None
+        # Try relative path as fallback
+        model_path = Path('models/recommendation_model.pkl')
+        if not model_path.exists():
+            return None, None
     
     try:
         # Try loading with error handling for version mismatches
@@ -466,18 +471,31 @@ def main():
     
     # Auto load model (silent)
     if not st.session_state.model_loaded:
-        system, games_df = load_model()
-        if system is not None and games_df is not None:
-            st.session_state.model_data = system
-            st.session_state.games_df = games_df
-            st.session_state.model_loaded = True
-        else:
-            st.error("❌ Model not found! Please place `models/recommendation_model.pkl`")
-            st.info("""
-            **Instructions:**
-            1. Make sure `recommendation_model.pkl` is in the `models/` folder
-            2. Refresh this page
-            """)
+        try:
+            system, games_df = load_model()
+            if system is not None and games_df is not None:
+                st.session_state.model_data = system
+                st.session_state.games_df = games_df
+                st.session_state.model_loaded = True
+            else:
+                st.error("❌ Model not found!")
+                st.warning("""
+                **Possible issues:**
+                1. Model file not uploaded to Git LFS correctly
+                2. Git LFS not pulling model file on Streamlit Cloud
+                3. Model file path incorrect
+                
+                **Check:**
+                - Go to GitHub repository
+                - Verify `models/recommendation_model.pkl` shows "Stored with Git LFS"
+                - Check Streamlit Cloud logs for Git LFS errors
+                """)
+                st.stop()
+        except Exception as e:
+            st.error(f"❌ Error loading app: {e}")
+            import traceback
+            with st.expander("🔍 Full Error Details"):
+                st.code(traceback.format_exc())
             st.stop()
     
     # Sidebar - User Management
