@@ -334,8 +334,57 @@ class HybridRecommendationSystem:
 
 @st.cache_resource(show_spinner=False)
 def load_model():
-    """Load pre-trained model from pickle file"""
+    """Load pre-trained model from pickle file or URL"""
     model_path = Path('models/recommendation_model.pkl')
+    
+    # Check if model URL is provided in secrets
+    model_url = None
+    try:
+        if hasattr(st, 'secrets') and 'model' in st.secrets and 'url' in st.secrets.model:
+            model_url = st.secrets.model.url
+    except:
+        pass
+    
+    # If model doesn't exist locally and URL is provided, download it
+    if not model_path.exists() and model_url:
+        st.info("📥 Downloading model from cloud storage... This may take a few minutes.")
+        try:
+            import requests
+            
+            # Download with progress
+            response = requests.get(model_url, stream=True, timeout=300)  # 5 min timeout
+            response.raise_for_status()  # Raise error if bad status
+            total_size = int(response.headers.get('content-length', 0))
+            
+            # Create models directory if not exists
+            model_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Progress bar
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            with open(model_path, 'wb') as f:
+                downloaded = 0
+                chunk_size = 8192 * 10  # 80KB chunks for faster download
+                
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        # Update progress every MB
+                        if total_size > 0 and downloaded % (1024 * 1024) == 0:
+                            progress = min(downloaded / total_size, 1.0)
+                            progress_bar.progress(progress)
+                            status_text.text(f"📥 Downloading: {downloaded / (1024*1024):.1f} MB / {total_size / (1024*1024):.1f} MB")
+            
+            progress_bar.empty()
+            status_text.empty()
+            st.success("✅ Model downloaded successfully!")
+        except Exception as e:
+            st.error(f"❌ Error downloading model: {e}")
+            st.warning("💡 Please check the model URL in Streamlit Secrets or ensure model file exists locally.")
+            return None, None
     
     if not model_path.exists():
         return None, None
