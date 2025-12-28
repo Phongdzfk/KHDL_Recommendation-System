@@ -355,44 +355,163 @@ def load_model():
         try:
             import requests
             
-            # Download with progress
-            response = requests.get(MODEL_URL, stream=True, timeout=600)  # 10 min timeout for large file
-            response.raise_for_status()  # Raise error if bad status
-            total_size = int(response.headers.get('content-length', 0))
+            # Try using gdown first (better for Google Drive large files)
+            use_gdown = False
+            try:
+                import gdown
+                use_gdown = True
+            except ImportError:
+                pass
             
-            # Create models directory if not exists
-            model_path.parent.mkdir(parents=True, exist_ok=True)
+            if use_gdown:
+                try:
+                    file_id = "180S_9i5886cn9l9qKCeAmft0otJpEN64"
+                    gdrive_url = f"https://drive.google.com/uc?id={file_id}"
+                    
+                    # Create models directory if not exists
+                    model_path.parent.mkdir(parents=True, exist_ok=True)
+                    
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    status_text.text("📥 Downloading with gdown...")
+                    
+                    # Download with gdown (handles Google Drive better)
+                    gdown.download(gdrive_url, str(model_path), quiet=False)
+                    
+                    progress_bar.empty()
+                    status_text.empty()
+                    
+                    # Validate downloaded file
+                    if not model_path.exists():
+                        raise FileNotFoundError("File was not downloaded")
+                    
+                    file_size = model_path.stat().st_size
+                    if file_size < 100 * 1024 * 1024:  # Less than 100MB is suspicious
+                        model_path.unlink()
+                        raise ValueError(f"Downloaded file is too small ({file_size / (1024*1024):.1f} MB). Expected > 100MB.")
+                    
+                    # Check pickle header
+                    with open(model_path, 'rb') as f:
+                        first_bytes = f.read(10)
+                        if not (first_bytes.startswith(b'\x80') or first_bytes.startswith(b'PK') or 
+                                first_bytes[0] in [0x02, 0x03, 0x04, 0x05]):
+                            f.seek(0)
+                            first_100 = f.read(100)
+                            if b'<html' in first_100.lower():
+                                model_path.unlink()
+                                raise ValueError("Downloaded HTML instead of pickle file")
+                    
+                    st.success(f"✅ Model downloaded successfully! ({file_size / (1024*1024):.1f} MB)")
+                except Exception as gdown_error:
+                    # If gdown fails, try requests method
+                    if model_path.exists():
+                        model_path.unlink()
+                    st.warning(f"⚠️ gdown failed: {gdown_error}. Trying requests method...")
+                    use_gdown = False  # Fall back to requests
             
-            # Progress bar
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            with open(model_path, 'wb') as f:
-                downloaded = 0
-                chunk_size = 8192 * 10  # 80KB chunks for faster download
+            # Fallback to requests if gdown not available or failed
+            if not use_gdown:
+                # Create session to handle Google Drive redirects and cookies
+                session = requests.Session()
                 
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        
-                        # Update progress every MB
-                        if total_size > 0 and downloaded % (1024 * 1024) == 0:
-                            progress = min(downloaded / total_size, 1.0)
-                            progress_bar.progress(progress)
-                            status_text.text(f"📥 Downloading: {downloaded / (1024*1024):.1f} MB / {total_size / (1024*1024):.1f} MB")
-            
-            progress_bar.empty()
-            status_text.empty()
-            st.success("✅ Model downloaded successfully!")
+                # First request to get the actual download URL (handle virus scan warning)
+                response = session.get(MODEL_URL, stream=True, timeout=600, allow_redirects=True)
+                response.raise_for_status()
+                
+                # Check if we got HTML instead of binary file (Google Drive virus scan warning)
+                content_type = response.headers.get('content-type', '').lower()
+                if 'text/html' in content_type:
+                    # Try to extract download link from HTML
+                    import re
+                    html_content = response.text
+                    # Look for the actual download link in the HTML
+                    match = re.search(r'href="(/uc\?export=download[^"]+)"', html_content)
+                    if match:
+                        # Construct full URL
+                        download_url = "https://drive.google.com" + match.group(1)
+                        response = session.get(download_url, stream=True, timeout=600, allow_redirects=True)
+                        response.raise_for_status()
+                    else:
+                        # Try alternative method: use direct download with confirm parameter
+                        file_id = "180S_9i5886cn9l9qKCeAmft0otJpEN64"
+                        download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+                        response = session.get(download_url, stream=True, timeout=600, allow_redirects=True)
+                        response.raise_for_status()
+                        # Check again if still HTML
+                        if 'text/html' in response.headers.get('content-type', '').lower():
+                            raise ValueError("Google Drive returned HTML page instead of file. File may be too large for direct download.")
+                
+                # Validate we got binary content
+                content_type = response.headers.get('content-type', '').lower()
+                if 'text/html' in content_type:
+                    # Read first bytes to check
+                    first_chunk = next(response.iter_content(chunk_size=1024), b'')
+                    if b'<html' in first_chunk.lower() or b'<!doctype' in first_chunk.lower():
+                        raise ValueError("Downloaded file is HTML, not binary. Google Drive may require manual download.")
+                    # Reset response for reading
+                    response = session.get(response.url, stream=True, timeout=600)
+                
+                total_size = int(response.headers.get('content-length', 0))
+                
+                # Create models directory if not exists
+                model_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Progress bar
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                with open(model_path, 'wb') as f:
+                    downloaded = 0
+                    chunk_size = 8192 * 10  # 80KB chunks for faster download
+                    
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            
+                            # Update progress every MB
+                            if total_size > 0 and downloaded % (1024 * 1024) == 0:
+                                progress = min(downloaded / total_size, 1.0)
+                                progress_bar.progress(progress)
+                                status_text.text(f"📥 Downloading: {downloaded / (1024*1024):.1f} MB / {total_size / (1024*1024):.1f} MB")
+                
+                progress_bar.empty()
+                status_text.empty()
+                
+                # Validate downloaded file
+                file_size = model_path.stat().st_size
+                if file_size < 100 * 1024 * 1024:  # Less than 100MB is suspicious
+                    model_path.unlink()  # Delete invalid file
+                    raise ValueError(f"Downloaded file is too small ({file_size / (1024*1024):.1f} MB). Expected > 100MB. File may be corrupted or HTML page.")
+                
+                # Check if it's a valid pickle file
+                with open(model_path, 'rb') as f:
+                    first_bytes = f.read(10)
+                    # Pickle files typically start with protocol bytes (0x80, 0x02, etc.) or 'PK' for zip
+                    if not (first_bytes.startswith(b'\x80') or first_bytes.startswith(b'PK') or 
+                            first_bytes[0] in [0x02, 0x03, 0x04, 0x05]):
+                        # Check if it's HTML
+                        f.seek(0)
+                        first_100 = f.read(100)
+                        if b'<html' in first_100.lower() or b'<!doctype' in first_100.lower():
+                            model_path.unlink()
+                            raise ValueError("Downloaded file is HTML page, not pickle file. Google Drive may require manual confirmation.")
+                        # If not HTML but also not pickle, warn but continue
+                        st.warning(f"⚠️ File doesn't start with pickle markers. Size: {file_size / (1024*1024):.1f} MB")
+                
+                st.success(f"✅ Model downloaded successfully! ({file_size / (1024*1024):.1f} MB)")
         except Exception as e:
+            if model_path.exists():
+                model_path.unlink()  # Clean up invalid file
             st.error(f"❌ Error downloading model: {e}")
             st.warning("💡 **Possible solutions:**")
             st.info("""
             1. **Check internet connection** on Streamlit Cloud
-            2. **Verify Google Drive link** is accessible
-            3. **Try alternative method:** Upload to Dropbox or GitHub Releases
-            4. **Check file size:** Ensure file is not corrupted
+            2. **Verify Google Drive link** is accessible and file is shared publicly
+            3. **File size:** Google Drive may block large file downloads. Try:
+               - Use alternative: Dropbox, GitHub Releases, or AWS S3
+               - Split model into smaller parts
+            4. **Manual download:** Download file manually and upload to Streamlit Cloud secrets
             """)
             import traceback
             with st.expander("🔍 Full Error Details"):
