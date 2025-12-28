@@ -34,18 +34,8 @@ st.markdown("""
         font-weight: bold;
         text-align: center;
         color: #667eea !important;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
         margin-bottom: 1rem;
-    }
-    /* Fallback: if gradient doesn't work, use solid color */
-    @supports not (-webkit-background-clip: text) {
-        .main-header {
-            color: #667eea !important;
-            -webkit-text-fill-color: #667eea !important;
-        }
+        text-shadow: 2px 2px 4px rgba(102, 126, 234, 0.2);
     }
     .game-card {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
