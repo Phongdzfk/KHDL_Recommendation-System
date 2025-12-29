@@ -168,9 +168,16 @@ class HybridRecommendationSystem:
         dists_cont, indices_cont = self.content_model.kneighbors(
             self.feature_vectors[game_idx], n_neighbors=top_n+1)
         
-        # Get candidates from Collaborative
-        dists_collab, indices_collab = self.collab_model.kneighbors(
-            self.item_user_matrix[game_idx], n_neighbors=top_n+1)
+        # Get candidates from Collaborative (guarded)
+        try:
+            dists_collab, indices_collab = self.collab_model.kneighbors(
+                self.item_user_matrix[game_idx], n_neighbors=top_n+1)
+        except Exception as e:
+            # If collab kneighbors fails (heavy compute or other issues), fallback gracefully
+            import sys
+            print(f"[WARN] collab.kneighbors failed for game_idx={game_idx}: {e}", file=sys.stderr)
+            dists_collab = np.array([[]])
+            indices_collab = np.array([[]])
         
         # Combine Scores
         scores = {}
@@ -221,9 +228,15 @@ class HybridRecommendationSystem:
             d_cont, i_cont = self.content_model.kneighbors(
                 self.feature_vectors[game_idx], n_neighbors=15)
             
-            # Find Collab neighbors
-            d_coll, i_coll = self.collab_model.kneighbors(
-                self.item_user_matrix[game_idx], n_neighbors=15)
+            # Find Collab neighbors (guarded)
+            try:
+                d_coll, i_coll = self.collab_model.kneighbors(
+                    self.item_user_matrix[game_idx], n_neighbors=15)
+            except Exception as e:
+                import sys
+                print(f"[WARN] collab.kneighbors failed for game_idx={game_idx}: {e}", file=sys.stderr)
+                d_coll = np.array([[]])
+                i_coll = np.array([[]])
             
             # Add content-based candidates
             for dist, neighbor_idx in zip(d_cont[0], i_cont[0]):
@@ -290,9 +303,15 @@ class HybridRecommendationSystem:
             d_cont, i_cont = self.content_model.kneighbors(
                 self.feature_vectors[idx], n_neighbors=15)
             
-            # Find Collab neighbors
-            d_coll, i_coll = self.collab_model.kneighbors(
-                self.item_user_matrix[idx], n_neighbors=15)
+            # Find Collab neighbors (guarded)
+            try:
+                d_coll, i_coll = self.collab_model.kneighbors(
+                    self.item_user_matrix[idx], n_neighbors=15)
+            except Exception as e:
+                import sys
+                print(f"[WARN] collab.kneighbors failed for idx={idx}: {e}", file=sys.stderr)
+                d_coll = np.array([[]])
+                i_coll = np.array([[]])
             
             # Add candidates
             for dist, neighbor_idx in zip(d_cont[0], i_cont[0]):
@@ -620,11 +639,18 @@ def load_model():
         raise e
 
 @st.cache_data(ttl=300, show_spinner=False)  # Cache for 5 minutes
-def get_cached_recommendations(_model, user_ratings_dict, top_n):
-    """Cache recommendations to improve performance"""
-    # Create a hash key from sorted ratings
-    # Note: _model has leading underscore so Streamlit doesn't try to hash it
-    return _model.recommend_by_user_realtime(user_ratings_dict, top_n=top_n)
+def get_cached_recommendations(user_ratings_items, top_n):
+    """Cache recommendations to improve performance
+
+    user_ratings_items should be a list of (game_id, rating) tuples so it's hashable by Streamlit cache.
+    """
+    # Convert back to dict
+    user_ratings_dict = dict(user_ratings_items)
+    # Use model from session state (do not pass the model object into the cache key)
+    system = st.session_state.model_data
+    if system is None:
+        return []
+    return system.recommend_by_user_realtime(user_ratings_dict, top_n=top_n)
 
 @st.cache_data(show_spinner=False)
 def get_all_games_list(games_df):
@@ -1025,6 +1051,10 @@ def main():
                             )
                     
                     if st.button("🎮 Get Recommendations", use_container_width=True, type="primary"):
+                        # Clear session state for test user to force fresh computation
+                        if f'test_user_recs_{actual_user_id}' in st.session_state:
+                            del st.session_state[f'test_user_recs_{actual_user_id}']
+                        
                         recommendations = st.session_state.model_data.recommend_by_user_with_filters(
                             actual_user_id,
                             top_n=num_recs,
@@ -1163,28 +1193,93 @@ def main():
                             )
                     
                     if st.button("🎮 Get Recommendations Based on My Ratings", use_container_width=True, type="primary"):
+                        # Clear session state to force fresh recommendation computation
+                        if f'user_recs_{st.session_state.current_user_id}' in st.session_state:
+                            del st.session_state[f'user_recs_{st.session_state.current_user_id}']
+                        
                         # Get ratings from database
                         user_ratings_df = st.session_state.db.get_user_ratings(st.session_state.current_user_id)
                         
                         if len(user_ratings_df) == 0:
                             st.info("💡 Please rate at least one game above to get recommendations!")
                         else:
-                            # Convert to dict format
-                            user_ratings_dict = dict(zip(user_ratings_df['game_id'], user_ratings_df['rating']))
+                            # Convert to dict format (ensure keys are native ints where possible)
+                            user_ratings_dict = {}
+                            for gid, r in zip(user_ratings_df['game_id'], user_ratings_df['rating']):
+                                try:
+                                    # Prefer Python int for consistent lookup with model data
+                                    key = int(gid)
+                                except Exception:
+                                    key = gid
+                                user_ratings_dict[key] = float(r)
                             
                             # Use multiselect values directly
                             required_genres = required_genres_list if required_genres_list else None
                             exclude_genres = exclude_genres_list if exclude_genres_list else None
                             
-                            # Use cached recommendations for better performance
-                            recommendations = get_cached_recommendations(
-                                st.session_state.model_data,
-                                user_ratings_dict,
-                                num_recs * 3  # Get more to account for filtering
-                            )
+                            # For sparse users (few ratings), skip cache and go straight to content-based fallback
+                            is_sparse_user = len(user_ratings_dict) < 5
+                            
+                            # Try cached recommendations first, but add diagnostics if none returned
+                            try:
+                                if is_sparse_user:
+                                    # Skip cache for sparse users; go directly to fallback
+                                    recommendations = []
+                                else:
+                                    # Use a hashable key (list of tuples) for caching
+                                    recommendations = get_cached_recommendations(
+                                        list(user_ratings_dict.items()),
+                                        num_recs * 3  # Get more to account for filtering
+                                    )
+                            except Exception as e:
+                                st.error(f"❌ Error while computing recommendations: {e}")
+                                # Try direct call to gather more info
+                                try:
+                                    direct_recs = st.session_state.model_data.recommend_by_user_realtime(user_ratings_dict, top_n=num_recs * 3)
+                                except Exception as e2:
+                                    direct_recs = []
+                                recommendations = direct_recs if direct_recs else []
+                            
+                            # If no recommendations, provide helpful diagnostics and try fallbacks
+                            if not recommendations:
+                                # Show example rated games and whether they exist in the model
+                                rated_games = list(user_ratings_dict.keys())[:10]
+                                missing = [gid for gid in rated_games if gid not in st.session_state.model_data.game_id_to_index]
+                                present = [gid for gid in rated_games if gid in st.session_state.model_data.game_id_to_index]
+                                
+                                # Try a direct (non-cached) call to see if cache was the issue
+                                try:
+                                    direct_recs = st.session_state.model_data.recommend_by_user_realtime(user_ratings_dict, top_n=num_recs * 3)
+                                    # If direct call returns results, use them (and avoid cache)
+                                    if direct_recs:
+                                        recommendations = direct_recs
+                                except Exception as e:
+                                    recommendations = []
+
+                                # Fallback: If still empty, recommend games similar to the rated games (content-based fallback)
+                                if not recommendations:
+                                    from collections import defaultdict as _defaultdict
+                                    fallback_scores = _defaultdict(float)
+                                    fallback_count = 0
+                                    for gid, rating in user_ratings_dict.items():
+                                        try:
+                                            sim_list = st.session_state.model_data.recommend_by_game(gid, top_n=num_recs * 3)
+                                            for rec_gid, score in sim_list:
+                                                # Weight fallback by user's rating
+                                                fallback_scores[rec_gid] += score * (rating / 5.0)
+                                            fallback_count += 1
+                                        except Exception as e:
+                                            pass
+                                    if fallback_scores:
+                                        # Sort and take top_n
+                                        fallback_sorted = sorted(fallback_scores.items(), key=lambda x: x[1], reverse=True)
+                                        recommendations = fallback_sorted[:num_recs]
+                                        # Save and rerun to display fallback recs
+                                        st.session_state[f'user_recs_{st.session_state.current_user_id}'] = recommendations
+                                        st.rerun()
                             
                             # Apply filters manually if needed
-                            if min_year or max_price or required_genres or exclude_genres:
+                            if recommendations and (min_year or max_price or required_genres or exclude_genres):
                                 filtered_recs = []
                                 for game_id, score in recommendations:
                                     game_info = st.session_state.model_data.get_game_info(game_id)
@@ -1207,6 +1302,10 @@ def main():
                                         break
                                 
                                 recommendations = filtered_recs
+                            
+                            # Trim to num_recs and save recommendations to session state and rerun to display
+                            if recommendations:
+                                recommendations = recommendations[:num_recs]
                                 st.session_state[f'user_recs_{st.session_state.current_user_id}'] = recommendations
                                 st.rerun()
                 
