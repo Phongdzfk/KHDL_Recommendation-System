@@ -856,7 +856,7 @@ def main():
         st.warning("⚠️ Please create or select a user to start!")
         st.info("💡 Use the sidebar to create a new user or select an existing one.")
     else:
-        tab1, tab2, tab3, tab4 = st.tabs(["🎯 Game Recommendations", "🔍 Search Games", "📊 History", "ℹ️ Model Info"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["🎯 Game Recommendations", "🔍 Search Games", "📊 History", "ℹ️ Model Info", "📈 Analytics"])
         
         with tab1:
             st.header("🎯 Get Game Recommendations")
@@ -1683,6 +1683,41 @@ def main():
                 - Price
                 """)
                 
+                # Load and display metrics from CSV
+                st.subheader("📊 Model Performance Metrics")
+                try:
+                    metrics_path = Path(__file__).parent.parent / "data" / "metrics.csv"
+                    if metrics_path.exists():
+                        metrics_df = pd.read_csv(metrics_path)
+                        # Display metrics in columns
+                        metric_cols = st.columns(len(metrics_df.columns))
+                        for idx, col in enumerate(metrics_df.columns):
+                            with metric_cols[idx]:
+                                value = metrics_df[col].values[0]
+                                # Format the value nicely
+                                if isinstance(value, float):
+                                    if value < 1:
+                                        display_value = f"{value:.4f}"
+                                    else:
+                                        display_value = f"{value:.2f}"
+                                else:
+                                    display_value = str(value)
+                                st.metric(col.replace("_", " "), display_value)
+                        
+                        st.markdown("**Metric Definitions:**")
+                        st.markdown("""
+                        - **RMSE**: Root Mean Squared Error - measures prediction accuracy
+                        - **MAE**: Mean Absolute Error - average prediction error
+                        - **Precision@10**: Fraction of relevant items in top 10 recommendations
+                        - **Recall@10**: Fraction of relevant items found in top 10
+                        - **Hit_Count**: Number of successful recommendations
+                        - **Total_Evaluated**: Total recommendations evaluated
+                        """)
+                    else:
+                        st.warning("metrics.csv not found")
+                except Exception as e:
+                    st.error(f"Error loading metrics: {e}")
+                
                 # Sample games
                 st.subheader("📋 Sample Games in Database")
                 # Show columns that are available
@@ -1694,6 +1729,64 @@ def main():
                 
                 sample_games = st.session_state.games_df.head(10)[display_cols]
                 st.dataframe(sample_games, use_container_width=True, hide_index=True)
+        
+        with tab5:
+            st.header("📈 Analytics & Insights")
+            
+            # Display visualizations
+            st.subheader("📊 Analysis Charts")
+            
+            # Load and display visualizations from data folder
+            data_dir = Path(__file__).parent.parent / "data"
+            image_files = sorted(data_dir.glob("*.png"))
+            
+            if image_files:
+                for img_file in image_files:
+                    try:
+                        from PIL import Image
+                        img = Image.open(img_file)
+                        st.image(img, use_column_width=True, caption=img_file.stem.replace("_", " ").title())
+                    except Exception as e:
+                        st.error(f"Error loading {img_file.name}: {e}")
+            else:
+                st.info("No visualization images found in data folder")
+            
+            st.markdown("---")
+            
+            # Display metrics
+            st.subheader("📊 Model Performance Metrics")
+            try:
+                metrics_path = Path(__file__).parent.parent / "data" / "metrics.csv"
+                if metrics_path.exists():
+                    metrics_df = pd.read_csv(metrics_path)
+                    # Display metrics in columns
+                    metric_cols = st.columns(len(metrics_df.columns))
+                    for idx, col in enumerate(metrics_df.columns):
+                        with metric_cols[idx]:
+                            value = metrics_df[col].values[0]
+                            # Format the value nicely
+                            if isinstance(value, float):
+                                if value < 1:
+                                    display_value = f"{value:.4f}"
+                                else:
+                                    display_value = f"{value:.2f}"
+                            else:
+                                display_value = str(value)
+                            st.metric(col.replace("_", " "), display_value)
+                    
+                    st.markdown("**Metric Definitions:**")
+                    st.markdown("""
+                    - **RMSE**: Root Mean Squared Error - measures prediction accuracy
+                    - **MAE**: Mean Absolute Error - average prediction error
+                    - **Precision@10**: Fraction of relevant items in top 10 recommendations
+                    - **Recall@10**: Fraction of relevant items found in top 10
+                    - **Hit_Count**: Number of successful recommendations
+                    - **Total_Evaluated**: Total recommendations evaluated
+                    """)
+                else:
+                    st.warning("metrics.csv not found")
+            except Exception as e:
+                st.error(f"Error loading metrics: {e}")
 
 if __name__ == "__main__":
     main()
